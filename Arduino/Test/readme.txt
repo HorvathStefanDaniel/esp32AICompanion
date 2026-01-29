@@ -1,0 +1,1 @@
+This "test.ino is just to make sure the Arduino is wired correctly, and to check that the speaker and microphone work correctly. The amplifier works on 3.3v, but an external 5v is recommended for more volume and so that the esp32 doesn't brown out on louder sounds (for example blowing into the microphone can crash it on 3.3v) 
