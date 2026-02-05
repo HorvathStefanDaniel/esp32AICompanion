@@ -167,13 +167,12 @@ void speakGoogleTTS(const String& text) {
 
   Serial.printf("\nDownloaded %u bytes\n", (unsigned)bytesRead);
 
-  // Manual JSON parsing - find "audioContent":"..."
-  // Format: {"audioContent": "base64data..."}
+  // Find audioContent field
   const char* needle = "\"audioContent\":";
   char* audioContentPos = strstr(responseBuffer, needle);
   
   if (!audioContentPos) {
-    Serial.println("audioContent not found in JSON");
+    Serial.println("audioContent not found");
     heap_caps_free(responseBuffer);
     digitalWrite(PIN_RED, HIGH);
     ttsPlaying = false;
@@ -181,27 +180,27 @@ void speakGoogleTTS(const String& text) {
     return;
   }
   
-  // Skip to opening quote after the colon
+  // Skip to opening quote
   char* start = strchr(audioContentPos + strlen(needle), '"');
   if (!start) {
-    Serial.println("audioContent value quote not found");
+    Serial.println("Opening quote not found");
     heap_caps_free(responseBuffer);
     digitalWrite(PIN_RED, HIGH);
     ttsPlaying = false;
     speakGroqTTS(text);
     return;
   }
-  start++; // Skip the opening "
+  start++; // Skip "
   
-  // Find closing quote
-  char* end = start;
-  while (*end && *end != '"') {
-    if (*end == '\\') end++; // Skip escaped chars
-    end++;
+  // Allocate clean buffer for unescaped base64 (in PSRAM)
+  char* cleanB64 = nullptr;
+#if defined(ESP32)
+  if (psramFound()) {
+    cleanB64 = (char*)heap_caps_malloc(220000, MALLOC_CAP_SPIRAM);
   }
-  
-  if (*end != '"') {
-    Serial.println("audioContent closing quote not found");
+#endif
+  if (!cleanB64) {
+    Serial.println("Failed to allocate clean buffer");
     heap_caps_free(responseBuffer);
     digitalWrite(PIN_RED, HIGH);
     ttsPlaying = false;
@@ -209,16 +208,39 @@ void speakGoogleTTS(const String& text) {
     return;
   }
   
-  size_t b64Len = end - start;
-  Serial.printf("Extracted %u b64 chars, starting playback...\n", (unsigned)b64Len);
+  // Copy and unescape: remove \n and other JSON escapes
+  char* dst = cleanB64;
+  char* src = start;
+  size_t cleanLen = 0;
   
-  // Temporarily null-terminate for decoding
-  char savedChar = *end;
-  *end = '\0';
+  while (*src && *src != '"' && cleanLen < 219999) {
+    if (*src == '\\') {
+      src++; // Skip backslash
+      if (*src == 'n' || *src == 'r' || *src == 't') {
+        // Skip escaped whitespace chars - they shouldn't be in base64
+        src++;
+        continue;
+      } else if (*src == '"' || *src == '\\') {
+        // Keep escaped quote or backslash (though unlikely in base64)
+        *dst++ = *src++;
+        cleanLen++;
+      } else {
+        // Unknown escape, skip it
+        src++;
+      }
+    } else {
+      *dst++ = *src++;
+      cleanLen++;
+    }
+  }
+  *dst = '\0';
   
-  streamDecodeAndPlay(start);
+  Serial.printf("Cleaned base64: %u chars (removed %u chars)\n", 
+                (unsigned)cleanLen, (unsigned)(dst - cleanB64 - cleanLen));
   
-  *end = savedChar;
+  streamDecodeAndPlay(cleanB64);
+  
+  heap_caps_free(cleanB64);
   heap_caps_free(responseBuffer);
 
   digitalWrite(PIN_RED, HIGH);
@@ -234,131 +256,119 @@ void streamDecodeAndPlay(const char* b64Str) {
     return;
   }
 
-  Serial.printf("Starting decode & play (b64 len: %u)\n", (unsigned)b64Len);
+  Serial.printf("Decoding %u b64 chars...\n", (unsigned)b64Len);
 
-  // Chunk size: decodes to ~4KB, multiple of 4 for base64
-  const size_t B64_CHUNK = 5332;
-  const size_t AUDIO_CHUNK = (B64_CHUNK * 3) / 4 + 100;
-
-  uint8_t* audioBuffer = nullptr;
+  // Calculate decoded size (base64: 4 chars = 3 bytes)
+  size_t maxDecodedSize = (b64Len * 3) / 4 + 100;
+  
+  // Allocate buffer for entire decoded WAV (in PSRAM)
+  uint8_t* wavBuffer = nullptr;
 #if defined(ESP32)
   if (psramFound()) {
-    audioBuffer = (uint8_t*)heap_caps_malloc(AUDIO_CHUNK, MALLOC_CAP_SPIRAM);
+    wavBuffer = (uint8_t*)heap_caps_malloc(maxDecodedSize, MALLOC_CAP_SPIRAM);
   }
-  if (!audioBuffer) {
-    Serial.println("PSRAM alloc failed or not available, trying heap...");
-    audioBuffer = (uint8_t*)malloc(AUDIO_CHUNK);
-  }
-#else
-  audioBuffer = (uint8_t*)malloc(AUDIO_CHUNK);
 #endif
-  if (!audioBuffer) {
-    Serial.println("Audio buffer alloc failed completely");
+  if (!wavBuffer) {
+    Serial.println("Failed to allocate WAV buffer");
     return;
   }
 
-  bool headerParsed = false;
+  // Decode entire base64 at once
+  size_t decodedLen = 0;
+  int ret = mbedtls_base64_decode(wavBuffer, maxDecodedSize, &decodedLen,
+                                   (const uint8_t*)b64Str, b64Len);
+
+  if (ret != 0) {
+    Serial.printf("Base64 decode error: %d\n", ret);
+    heap_caps_free(wavBuffer);
+    return;
+  }
+
+  Serial.printf("Decoded %u bytes\n", (unsigned)decodedLen);
+
+  // Validate WAV header
+  if (decodedLen < 44 || wavBuffer[0] != 'R' || wavBuffer[1] != 'I' ||
+      wavBuffer[2] != 'F' || wavBuffer[3] != 'F') {
+    Serial.println("Invalid WAV file");
+    heap_caps_free(wavBuffer);
+    return;
+  }
+
+  // Parse WAV header
   uint32_t sampleRate = 24000;
   uint16_t channels = 1;
-  size_t totalAudioBytes = 0;
-  size_t dataStartOffset = 0;
+  size_t dataOffset = 0;
+  size_t dataSize = 0;
 
-  size_t totalChunks = (b64Len + B64_CHUNK - 1) / B64_CHUNK;
-  Serial.printf("Processing %u chunks...\n", (unsigned)totalChunks);
+  size_t pos = 12;
+  while (pos + 8 <= decodedLen && pos < 200) {
+    uint32_t chunkLen = wavBuffer[pos+4] | (wavBuffer[pos+5] << 8) |
+                        (wavBuffer[pos+6] << 16) | (wavBuffer[pos+7] << 24);
 
-  for (size_t offset = 0; offset < b64Len; offset += B64_CHUNK) {
-    size_t remaining = b64Len - offset;
-    size_t chunkSize = (remaining < B64_CHUNK) ? remaining : B64_CHUNK;
-
-    chunkSize = (chunkSize / 4) * 4;
-    if (chunkSize == 0) break;
-
-    size_t decodedLen = 0;
-    int ret = mbedtls_base64_decode(audioBuffer, AUDIO_CHUNK, &decodedLen,
-                                    (const uint8_t*)(b64Str + offset), chunkSize);
-
-    if (ret != 0 && ret != MBEDTLS_ERR_BASE64_INVALID_CHARACTER) {
-      Serial.printf("Decode error at offset %u: %d\n", (unsigned)offset, ret);
-      continue;
+    if (memcmp(wavBuffer + pos, "fmt ", 4) == 0) {
+      if (pos + 16 <= decodedLen) {
+        channels = wavBuffer[pos+10] | (wavBuffer[pos+11] << 8);
+        sampleRate = wavBuffer[pos+12] | (wavBuffer[pos+13] << 8) |
+                    (wavBuffer[pos+14] << 16) | (wavBuffer[pos+15] << 24);
+      }
     }
 
-    if (decodedLen == 0) continue;
-
-    if (!headerParsed && offset == 0) {
-      if (decodedLen < 44) {
-        Serial.println("First chunk too small for WAV header");
-        break;
-      }
-
-      if (audioBuffer[0] != 'R' || audioBuffer[1] != 'I' ||
-          audioBuffer[2] != 'F' || audioBuffer[3] != 'F') {
-        Serial.println("Invalid WAV signature");
-        break;
-      }
-
-      size_t pos = 12;
-      while (pos + 8 <= decodedLen && pos < 200) {
-        uint32_t chunkLen = audioBuffer[pos+4] | (audioBuffer[pos+5] << 8) |
-                            (audioBuffer[pos+6] << 16) | (audioBuffer[pos+7] << 24);
-
-        if (memcmp(audioBuffer + pos, "fmt ", 4) == 0) {
-          if (pos + 16 <= decodedLen) {
-            channels = audioBuffer[pos+10] | (audioBuffer[pos+11] << 8);
-            sampleRate = audioBuffer[pos+12] | (audioBuffer[pos+13] << 8) |
-                        (audioBuffer[pos+14] << 16) | (audioBuffer[pos+15] << 24);
-          }
-        }
-
-        if (memcmp(audioBuffer + pos, "data", 4) == 0) {
-          dataStartOffset = pos + 8;
-          Serial.printf("WAV header: %u Hz, %s, data at offset %u\n",
-                       (unsigned)sampleRate,
-                       channels == 1 ? "Mono" : "Stereo",
-                       (unsigned)dataStartOffset);
-
-          i2s_set_clk(I2S_NUM_1, sampleRate, I2S_BITS_PER_SAMPLE_16BIT,
-                     channels == 2 ? I2S_CHANNEL_STEREO : I2S_CHANNEL_MONO);
-          i2s_zero_dma_buffer(I2S_NUM_1);
-
-          headerParsed = true;
-          break;
-        }
-
-        pos += 8 + chunkLen;
-        if (chunkLen & 1) pos++;
-      }
-
-      if (!headerParsed) {
-        Serial.println("Failed to parse WAV header");
-        break;
-      }
-
-      if (decodedLen > dataStartOffset) {
-        size_t audioLen = decodedLen - dataStartOffset;
-        applyVolumeToPcm16(audioBuffer + dataStartOffset, audioLen);
-
-        size_t written = 0;
-        i2s_write(I2S_NUM_1, audioBuffer + dataStartOffset, audioLen, &written, portMAX_DELAY);
-        totalAudioBytes += written;
-      }
-    } else if (headerParsed) {
-      applyVolumeToPcm16(audioBuffer, decodedLen);
-
-      size_t written = 0;
-      i2s_write(I2S_NUM_1, audioBuffer, decodedLen, &written, portMAX_DELAY);
-      totalAudioBytes += written;
+    if (memcmp(wavBuffer + pos, "data", 4) == 0) {
+      dataOffset = pos + 8;
+      dataSize = chunkLen;
+      break;
     }
 
-    if (totalChunks > 10 && (offset / B64_CHUNK) % 10 == 0) {
+    pos += 8 + chunkLen;
+    if (chunkLen & 1) pos++;
+  }
+
+  if (dataOffset == 0 || dataSize == 0) {
+    Serial.println("No data chunk found");
+    heap_caps_free(wavBuffer);
+    return;
+  }
+
+  if (dataOffset + dataSize > decodedLen) {
+    dataSize = decodedLen - dataOffset;
+  }
+
+  Serial.printf("WAV: %u Hz, %s, %u bytes PCM\n",
+                (unsigned)sampleRate,
+                channels == 1 ? "Mono" : "Stereo",
+                (unsigned)dataSize);
+
+  // Configure I2S
+  i2s_set_clk(I2S_NUM_1, sampleRate, I2S_BITS_PER_SAMPLE_16BIT,
+             channels == 2 ? I2S_CHANNEL_STEREO : I2S_CHANNEL_MONO);
+  i2s_zero_dma_buffer(I2S_NUM_1);
+
+  // Apply volume to entire buffer at once
+  applyVolumeToPcm16(wavBuffer + dataOffset, dataSize);
+
+  // Play in larger chunks (8KB at a time for smooth playback)
+  const size_t PLAY_CHUNK = 8192;
+  size_t totalWritten = 0;
+
+  for (size_t offset = 0; offset < dataSize; offset += PLAY_CHUNK) {
+    size_t toWrite = min((size_t)PLAY_CHUNK, dataSize - offset);
+    size_t written = 0;
+    
+    i2s_write(I2S_NUM_1, wavBuffer + dataOffset + offset, toWrite, &written, portMAX_DELAY);
+    totalWritten += written;
+    
+    // Progress indicator
+    if ((offset / PLAY_CHUNK) % 5 == 0) {
       Serial.print(".");
     }
   }
 
-  Serial.printf("\nPlayed %u audio bytes total\n", (unsigned)totalAudioBytes);
+  Serial.printf("\nPlayed %u bytes\n", (unsigned)totalWritten);
 
+  // Flush with silence
   uint8_t silence[512] = {0};
   size_t written = 0;
   i2s_write(I2S_NUM_1, silence, 512, &written, 100);
 
-  free(audioBuffer);
+  heap_caps_free(wavBuffer);
 }
