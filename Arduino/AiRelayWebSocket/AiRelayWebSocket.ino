@@ -316,9 +316,22 @@ void loop() {
       Serial.println("Testing Groq TTS...");
       speakGroqTTS("Hello, this is a Groq test.");
     } else if (c == 'O' || c == 'o') {
-      // Test Google TTS
-      Serial.println("Testing Google TTS...");
-      speakGoogleTTS("Hello, this is a Google Cloud text to speech test.");
+      // O [message] - read rest of line as custom message for Google TTS
+      String customMsg = "";
+      unsigned long start = millis();
+      bool lineDone = false;
+      while (millis() - start < 1000 && !lineDone) {
+        while (Serial.available() > 0) {
+          char d = Serial.read();
+          if (d == '\n' || d == '\r') { lineDone = true; break; }
+          customMsg += d;
+        }
+        if (!lineDone) delay(10);
+      }
+      customMsg.trim();
+      if (customMsg.length() == 0) customMsg = "Hello, this is a Google Cloud text to speech test.";
+      Serial.println("Google TTS: " + customMsg);
+      speakGoogleTTS(customMsg);
     } else if (c == 'P' || c == 'p') {
       // Toggle TTS provider
       if (ttsProvider == TTS_GROQ) {
@@ -407,7 +420,7 @@ void loop() {
       Serial.println("T      - Test current TTS provider");
       Serial.println("P      - Toggle TTS provider (Groq <-> Google)");
       Serial.println("G      - Test Groq TTS (free, unlimited)");
-      Serial.println("O      - Test Google TTS: \"Hello, this is a Google Cloud text to speech test.\"");
+      Serial.println("O [msg] - Test Google TTS with custom message (e.g. O Hello world)");
       Serial.println("M      - Show mic sensitivity threshold");
       Serial.println("M###   - Set mic threshold (lower=more sensitive, e.g. M200)");
       Serial.println("V      - Show volume");
