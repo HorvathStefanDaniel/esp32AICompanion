@@ -33,7 +33,11 @@ const char* groq_api_key = GROQ_API_KEY;
 const char* tts_model = "canopylabs/orpheus-v1-english";
 const char* tts_voice = "autumn";
 const char* stt_model = "whisper-large-v3-turbo";
-const char* llm_model = "llama-3.1-8b-instant";
+
+// LLM toggle: 8b (fast) <-> 70b (advanced)
+const char* llm_model_8b = "llama-3.1-8b-instant";
+const char* llm_model_70b = "llama-3.3-70b-versatile";
+const char* llm_model = llm_model_8b;
 
 // Wake/end word: set requireWakeEndWords = false to send every utterance to LLM
 const char* wake_word = "instructor";
@@ -53,8 +57,8 @@ String stt_ws_path = "/v3/ws?sample_rate=16000&encoding=pcm_s16le&format_turns=t
                      "&max_turn_silence=1500";
 
 // Audio calibration (use M/V/I serial commands to tune)
-int outputVolumePercent = 10;
-int silenceThreshold = 100;
+int outputVolumePercent = 100;
+int silenceThreshold = 20;
 int micTestVolumeShift = 2;
 
 TtsProvider ttsProvider = TTS_GOOGLE;
@@ -259,6 +263,8 @@ void setup() {
   Serial.println("Type H for help with serial commands.");
   Serial.print("TTS provider: ");
   Serial.println(ttsProvider == TTS_GOOGLE ? "Google" : "Groq");
+  Serial.print("LLM model: ");
+  Serial.println(llm_model == llm_model_8b ? "llama-3.1-8b-instant" : "llama-3.3-70b-versatile");
   if (requireWakeEndWords) {
     Serial.printf("Wake/end words: '%s'...'%s'\n", wake_word, end_word);
   } else {
@@ -308,13 +314,37 @@ void loop() {
   while (Serial.available() > 0) {
     char c = Serial.read();
     if (c == 'T' || c == 't') {
-      // Test TTS with fixed phrase
-      String testPhrase = "Hello, this is a test of the text to speech system.";
-      Serial.println("Testing TTS: " + testPhrase);
-      if (ttsProvider == TTS_GOOGLE) {
-        speakGoogleTTS(testPhrase);
+      // Check for "oggleLLM" (toggle LLM model) vs plain T (TTS test)
+      String rest = "";
+      unsigned long start = millis();
+      while (millis() - start < 300) {
+        while (Serial.available() > 0) {
+          char d = Serial.read();
+          if (d == '\n' || d == '\r') break;
+          rest += d;
+        }
+        if (rest.indexOf('\n') >= 0) break;
+        delay(5);
+      }
+      rest.trim();
+      rest.toLowerCase();
+      if (rest == "ogglellm") {
+        if (llm_model == llm_model_8b) {
+          llm_model = llm_model_70b;
+          Serial.println("LLM model: llama-3.3-70b-versatile (advanced)");
+        } else {
+          llm_model = llm_model_8b;
+          Serial.println("LLM model: llama-3.1-8b-instant (fast)");
+        }
       } else {
-        speakGroqTTS(testPhrase);
+        // Test TTS with fixed phrase
+        String testPhrase = "Hello, this is a test of the text to speech system.";
+        Serial.println("Testing TTS: " + testPhrase);
+        if (ttsProvider == TTS_GOOGLE) {
+          speakGoogleTTS(testPhrase);
+        } else {
+          speakGroqTTS(testPhrase);
+        }
       }
     } else if (c == 'G' || c == 'g') {
       // Force test Groq TTS
@@ -486,6 +516,7 @@ void loop() {
       // Help - list all commands
       Serial.println("\n=== Serial Commands ===");
       Serial.println("T      - Test current TTS provider");
+      Serial.println("toggleLLM - Toggle LLM (8b fast <-> 70b advanced)");
       Serial.println("P      - Toggle TTS provider (Groq <-> Google)");
       Serial.println("G      - Test Groq TTS (free, unlimited)");
       Serial.println("say [text] - Send as voice input: LLM + TTS (e.g. say What time is it?)");
@@ -509,6 +540,7 @@ void loop() {
       Serial.printf("  Volume: %d%%\n", outputVolumePercent);
       Serial.printf("  Wake/end words: %s\n", requireWakeEndWords ? "Required" : "Disabled");
       Serial.printf("  Mic test mode: %s\n", micTestMode ? "ON" : "OFF");
+      Serial.printf("  LLM model: %s\n", llm_model == llm_model_8b ? "llama-3.1-8b-instant" : "llama-3.3-70b-versatile");
       Serial.println("=======================\n");
     }
   }
