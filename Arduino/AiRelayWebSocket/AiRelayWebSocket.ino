@@ -37,7 +37,7 @@ const char* llm_model = "llama-3.1-8b-instant";
 
 // Wake/end word: set requireWakeEndWords = false to send every utterance to LLM
 const char* wake_word = "instructor";
-const char* end_word = "please";
+const char* end_word = "";
 bool requireWakeEndWords = true;
 bool wakeActive = false;
 String commandBuffer = "";
@@ -126,9 +126,8 @@ void setup() {
   pinMode(BOOT_BUTTON, INPUT_PULLUP);
 #endif
 #if USE_EXT_BUTTON
-  pinMode(BUTTON_GND, OUTPUT);
-  digitalWrite(BUTTON_GND, LOW);
   pinMode(BUTTON_IN, INPUT_PULLUP);
+  // Wire switch between BUTTON_IN and GND. No BUTTON_GND pin needed.
 #endif
   pinMode(PIN_RED, OUTPUT);
   pinMode(PIN_GREEN, OUTPUT);
@@ -273,7 +272,13 @@ void setup() {
 
 void loop() {
   static unsigned long lastButtonChangeMs = 0;
+#if USE_BOOT_BUTTON
+  bool buttonState = digitalRead(BOOT_BUTTON);
+#elif USE_EXT_BUTTON
   bool buttonState = digitalRead(BUTTON_IN);
+#else
+  bool buttonState = HIGH;  // no button
+#endif
   if (buttonState != lastButtonState) {
     lastButtonChangeMs = millis();
   }
@@ -315,6 +320,50 @@ void loop() {
       // Force test Groq TTS
       Serial.println("Testing Groq TTS...");
       speakGroqTTS("Hello, this is a Groq test.");
+    } else if (c == 'S' || c == 's') {
+      // say [input] - treat as STT input: send to LLM, play TTS, add to history
+      if (Serial.available() >= 3) {
+        char ay[3];
+        ay[0] = Serial.read();
+        ay[1] = Serial.read();
+        ay[2] = Serial.read();
+        if ((ay[0] == 'a' || ay[0] == 'A') && (ay[1] == 'y' || ay[1] == 'Y') && (ay[2] == ' ' || ay[2] == '\n' || ay[2] == '\r')) {
+          String inputLine = (ay[2] == ' ' || ay[2] == '\n' || ay[2] == '\r') ? "" : String(ay[2]);
+          unsigned long start = millis();
+          bool lineDone = (ay[2] == '\n' || ay[2] == '\r');
+          while (millis() - start < 2000 && !lineDone) {
+            while (Serial.available() > 0) {
+              char d = Serial.read();
+              if (d == '\n' || d == '\r') { lineDone = true; break; }
+              inputLine += d;
+            }
+            if (!lineDone) delay(5);
+          }
+          inputLine.trim();
+          Serial.println("You said: " + inputLine);
+          if (inputLine.length() > 0 && !isProcessing && !ttsPlaying) {
+            isProcessing = true;
+            ledWaiting = true;
+            String reply = getChatResponse(inputLine);
+            if (reply.length() > 0) {
+              Serial.print("AI says: ");
+              Serial.println(reply);
+              if (ttsProvider == TTS_GOOGLE) {
+                speakGoogleTTS(reply);
+              } else {
+                speakGroqTTS(reply);
+              }
+            }
+            addHistory("user", inputLine);
+            addHistory("assistant", reply);
+            isProcessing = false;
+            ledWaiting = false;
+          } else if (inputLine.length() == 0) {
+            Serial.println("say [text] - type text after 'say ' to send as voice input");
+          }
+        }
+        // else: wasn't "say ", could be S from another command - already consumed 3 chars
+      }
     } else if (c == 'O' || c == 'o') {
       // O [message] - read rest of line as custom message for Google TTS
       String customMsg = "";
@@ -342,20 +391,39 @@ void loop() {
         Serial.println("TTS provider: Groq");
       }
     } else if (c == 'M' || c == 'm') {
-      // Adjust mic sensitivity
-      String digits = "";
+      // mute = toggle listening (same as button) | M### = mic sensitivity
+      String rest = "";
       unsigned long start = millis();
-      while (millis() - start < 300) {
+      while (millis() - start < 500) {
         while (Serial.available() > 0) {
           char d = Serial.read();
-          if (d >= '0' && d <= '9') digits += d;
+          if (d == '\n' || d == '\r') break;
+          rest += d;
         }
+        if (rest.indexOf('\n') >= 0) break;
+        delay(5);
       }
-      if (digits.length() > 0) {
-        silenceThreshold = digits.toInt();
-        Serial.printf("Mic threshold set to %d\n", silenceThreshold);
+      rest.trim();
+      rest.toLowerCase();
+      if (rest == "ute") {
+        listeningEnabled = !listeningEnabled;
+        ledRecording = false;
+        ledWaiting = false;
+        Serial.print("Listening: ");
+        Serial.println(listeningEnabled ? "ON" : "OFF");
+      } else if (rest.length() > 0) {
+        bool allDigits = true;
+        for (size_t i = 0; i < rest.length(); i++) {
+          if (rest[i] < '0' || rest[i] > '9') { allDigits = false; break; }
+        }
+        if (allDigits) {
+          silenceThreshold = rest.toInt();
+          Serial.printf("Mic threshold set to %d\n", silenceThreshold);
+        } else {
+          Serial.printf("Current mic threshold: %d (use M### or 'mute')\n", silenceThreshold);
+        }
       } else {
-        Serial.printf("Current mic threshold: %d (lower=more sensitive)\n", silenceThreshold);
+        Serial.printf("Current mic threshold: %d (use M### or 'mute')\n", silenceThreshold);
       }
     } else if (c == 'V' || c == 'v') {
       // Adjust volume
@@ -420,7 +488,9 @@ void loop() {
       Serial.println("T      - Test current TTS provider");
       Serial.println("P      - Toggle TTS provider (Groq <-> Google)");
       Serial.println("G      - Test Groq TTS (free, unlimited)");
+      Serial.println("say [text] - Send as voice input: LLM + TTS (e.g. say What time is it?)");
       Serial.println("O [msg] - Test Google TTS with custom message (e.g. O Hello world)");
+      Serial.println("mute   - Toggle mic on/off (same as button)");
       Serial.println("M      - Show mic sensitivity threshold");
       Serial.println("M###   - Set mic threshold (lower=more sensitive, e.g. M200)");
       Serial.println("V      - Show volume");

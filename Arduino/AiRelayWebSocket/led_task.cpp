@@ -5,7 +5,11 @@
 
 void ledTask(void*) {
   for (;;) {
-    if (ledRecording) {
+    if (!listeningEnabled) {
+      // Mic muted by switch: both LEDs off
+      digitalWrite(PIN_RED, HIGH);
+      digitalWrite(PIN_GREEN, HIGH);
+    } else if (ledRecording) {
       digitalWrite(PIN_RED, LOW);
       digitalWrite(PIN_GREEN, HIGH);
     } else if (ledWaiting) {

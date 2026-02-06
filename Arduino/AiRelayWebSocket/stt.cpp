@@ -120,6 +120,11 @@ void streamMicFrame() {
   if (!listeningEnabled) {
     ledRecording = false;
     ledWaiting = false;
+    static unsigned long lastMutedPrintMs = 0;
+    if (millis() - lastMutedPrintMs >= 2500) {
+      Serial.println("Mic muted (listening OFF)");
+      lastMutedPrintMs = millis();
+    }
     return;
   }
   if (isProcessing || ttsPlaying || millis() < ttsCooldownUntilMs) {
