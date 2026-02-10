@@ -1,0 +1,166 @@
+\documentclass[a4paper,12pt]{article}
+
+% Packages
+\usepackage{graphicx}   % Required for inserting images
+\usepackage{hyperref}   % Required for clickable links and ToC
+\usepackage{geometry}   % Better page margins
+\usepackage{booktabs}   % For professional looking tables
+\usepackage{listings}   % For code snippets
+\usepackage{xcolor}     % For code coloring
+\usepackage{float}      % improved interface for floating objects
+
+% Setup for code snippets
+\lstset{
+    basicstyle=\ttfamily\small,
+    backgroundcolor=\color{gray!10},
+    frame=single,
+    breaklines=true,
+    keywordstyle=\color{blue},
+    commentstyle=\color{green!50!black},
+    stringstyle=\color{red}
+}
+
+% setup hyperlink colors
+\hypersetup{
+    colorlinks=true,
+    linkcolor=black,
+    filecolor=magenta,      
+    urlcolor=blue,
+    pdftitle={ESP32 AI Tutor Documentation},
+}
+
+% Project Metadata
+\title{\textbf{ESP32 AI Tutor Documentation}}
+\author{Stefan-Daniel Horvath}
+\date{February 2026}
+
+\begin{document}
+
+\maketitle
+
+% The Table of Contents
+\tableofcontents
+\newpage
+
+\section{Project Description}
+The \textbf{ESP32 AI Tutor} is an embedded hardware device designed to facilitate interactive learning through natural language processing. By leveraging the connectivity and processing power of the ESP32 microcontroller, this project integrates Large Language Model (LLM) APIs to provide voice or text-based educational assistance.
+
+The primary goal of this project is to create a low-cost, portable, and accessible teaching assistant that can answer questions, explain complex concepts, and assist with language learning without the need for a full computer or smartphone.
+
+\subsection{Key Features}
+\begin{itemize}
+    \item Real-time query processing via WiFi.
+    \item Text-to-Speech (TTS) output for auditory learning.
+    \item Integration with Groq and Google API.
+\end{itemize}
+
+\section{Links}
+\begin{itemize}
+    \item \textbf{GitHub Repository:} \href{https://github.com/HorvathStefanDaniel/esp32AICompanion}{https://github.com/HorvathStefanDaniel/esp32AICompanion}
+    \item \textbf{Demo Video:} \href{https://youtube.com}{YouTube Link}
+\end{itemize}
+
+\section{Hardware}
+
+\subsection{Bill of Materials (BOM)}
+The following components are required to build the AI Tutor:
+
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Component} & \textbf{Model/Type} & \textbf{Quantity} \\ \midrule
+Microcontroller     & ESP32-S3-N16R8        & 1                 \\
+Microphone          & INMP441 (I2S)         & 1                 \\
+Speaker Amp         & MAX98357A (I2S)       & 1                 \\
+LEDs                & 3.3V single-color LEDs (e.g. red, green) & 2                 \\
+Speaker             & 3W 8OHM speaker       & 1                 \\ \bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Wiring \& Pinout}
+The I2S peripherals connect to the ESP32 as listed below. These values match the current \texttt{config.h} in the project. For a visual representation of the connections, please refer to Figure \ref{fig:circuit}.
+
+\begin{itemize}
+    \item \textbf{Microphone (INMP441):} Only three pins go to the ESP32; the others go to 3.3V or GND.
+        \begin{itemize}
+            \item SCK (serial clock) $\rightarrow$ GPIO 12 (\texttt{I2S\_MIC\_SCK})
+            \item WS (word select / L/R clock) $\rightarrow$ GPIO 13 (\texttt{I2S\_MIC\_WS})
+            \item SD (data out) $\rightarrow$ GPIO 14 (\texttt{I2S\_MIC\_SD})
+            \item L/R $\rightarrow$ GND (selects left channel; 3.3V would select right)
+            \item VCC / 3V3 $\rightarrow$ 3.3V
+            \item GND $\rightarrow$ GND
+        \end{itemize}
+    \item \textbf{Amplifier (MAX98357A):} Again, only the I2S pins go to the ESP32; the rest are power/control.
+        \begin{itemize}
+            \item BCLK (bit clock) $\rightarrow$ GPIO 5 (\texttt{I2S\_SPK\_BCLK})
+            \item LRC / WS (left/right clock) $\rightarrow$ GPIO 4 (\texttt{I2S\_SPK\_LRC})
+            \item DIN (data in) $\rightarrow$ GPIO 6 (\texttt{I2S\_SPK\_DIN})
+            \item VIN $\rightarrow$ 3.3V or 5V via a decoupling capacitor
+            \item SD (shutdown) $\rightarrow$ 3.3V (always enabled)
+            \item GAIN $\rightarrow$ same rail as VIN (3.3V or 5V)
+            \item GND $\rightarrow$ GND
+        \end{itemize}
+    \item \textbf{Status LEDs:} Two single-color LEDs, wired as active-low indicators.
+        \begin{itemize}
+            \item RED LED: cathode $\rightarrow$ GPIO 1 (\texttt{PIN\_RED}), anode $\rightarrow$ resistor $\rightarrow$ 3.3V
+            \item GREEN LED: cathode $\rightarrow$ GPIO 2 (\texttt{PIN\_GREEN}), anode $\rightarrow$ resistor $\rightarrow$ 3.3V
+        \end{itemize}
+\end{itemize}
+
+% FIGURE INSERTION START
+\begin{figure}[ht]
+    \centering
+    % Ensure the path matches exactly where your .tex file is located relative to the Images folder
+    \includegraphics[width=1.0\textwidth]{Images/circuitDiagram.png}
+    \caption{Circuit Diagram: Wiring the INMP441 and MAX98357A to the ESP32}
+    \label{fig:circuit}
+\end{figure}
+% FIGURE INSERTION END
+
+\section{Software}
+
+\subsection{Environment Setup}
+This project is primarily built as an \textbf{Arduino} sketch (\texttt{AiRelayWebSocket.ino}) and can be compiled with \textbf{Arduino IDE 2.x} using the ESP32 board package. PlatformIO can also be used as an alternative environment.
+
+\subsubsection{Dependencies}
+Ensure the following libraries are installed via the Arduino Library Manager (or declared in \texttt{platformio.ini} if you use PlatformIO):
+\begin{itemize}
+    \item \texttt{WiFi} / \texttt{WiFiClientSecure} (ESP32 core)
+    \item \texttt{HTTPClient} (ESP32 core)
+    \item \texttt{WebSocketsClient} (by Markus Sattler)
+    \item \texttt{ArduinoJson} (by Benoît Blanchon)
+    \item \texttt{SPIFFS} (ESP32 filesystem support)
+    \item Included library \texttt{DAZI-AI-main} (MP3 decoder / audio playback)
+\end{itemize}
+
+\subsection{Configuration}
+Before flashing the device, you must configure your credentials in \texttt{secrets.h} (based on \texttt{secrets\_example.h}):
+
+\begin{lstlisting}[language=C++]
+// secrets.h template
+#ifndef SECRETS_H
+#define SECRETS_H
+
+// WiFi Credentials
+#define WIFI_SSID "your_wifi_ssid"
+#define WIFI_PASSWORD "your_wifi_password"
+
+// API Keys
+#define GROQ_API_KEY "gsk_..."
+#define ASSEMBLYAI_API_KEY "your_assemblyai_api_key"
+// Google Cloud TTS - Get API key from: https://console.cloud.google.com/apis/credentials
+// Enable "Cloud Text-to-Speech API" first at: https://console.cloud.google.com/apis/library/texttospeech.googleapis.com
+#define GOOGLE_TTS_API_KEY "your_google_tts_api_key"
+
+#endif
+\end{lstlisting}
+
+\subsection{Architecture Overview}
+The software operates in a loop consisting of three main states:
+\begin{enumerate}
+    \item \textbf{Listening:} Captures audio data via I2S.
+    \item \textbf{Processing:} Sends payload to the API and parses the JSON response.
+    \item \textbf{Responding:} Streams the audio response through the amplifier.
+\end{enumerate}
+
+\end{document}

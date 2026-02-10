@@ -12,11 +12,6 @@
 #define I2S_MIC_WS    13
 #define I2S_MIC_SD    14
 
-#define BOOT_BUTTON   0
-#define USE_BOOT_BUTTON 0
-#define USE_EXT_BUTTON 1
-#define BUTTON_IN    16
-#define BUTTON_GND   18
 #define PIN_RED       1
 #define PIN_GREEN     2
 
@@ -35,8 +30,6 @@ enum TtsProvider {
 };
 
 // ======================= TIMING =======================
-#define BUTTON_DEBOUNCE_MS 50
-#define BUTTON_LONG_MS 1200
 #define WS_KEEPALIVE_MS 30000
 #define WS_RECONNECT_MS 60000
 

@@ -60,15 +60,7 @@ void RecordAudio(bool holdToRecord) {
   uint64_t sum_abs = 0;
   uint32_t samples_total = 0;
   while (flash_wr_size < waveDataSize) {
-    if (holdToRecord) {
-#if USE_EXT_BUTTON
-      if (digitalRead(BUTTON_IN) == HIGH) break;
-#elif USE_BOOT_BUTTON
-      if (digitalRead(BOOT_BUTTON) == HIGH) break;
-#else
-      break;
-#endif
-    }
+    if (holdToRecord) break;  // No button: hold-to-record not used
     i2s_read(I2S_NUM_0, buffer, sizeof(buffer), &bytes_read, portMAX_DELAY);
     if (bytes_read > 0) {
       int samples_read = bytes_read / 4;

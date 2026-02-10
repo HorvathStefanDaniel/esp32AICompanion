@@ -92,14 +92,10 @@ unsigned long lastMicSendMs = 0;     // Track when we last sent audio
 // Mic test mode state (micTestVolumeShift is in AUDIO CALIBRATION section)
 bool micTestMode = false;
 bool listeningEnabled = true;
-bool lastButtonState = HIGH;
-bool buttonPressed = false;
-unsigned long buttonPressMs = 0;
 bool ttsPlaying = false;
 unsigned long ttsCooldownUntilMs = 0;
 int lastTurnOrderHandled = -1;
 
-// BUTTON_DEBOUNCE_MS, BUTTON_LONG_MS from config.h
 // ChatMessage struct and extern declarations in globals.h
 
 ChatMessage chatHistory[HISTORY_MAX];
@@ -126,13 +122,6 @@ void setup() {
     return;
   }
 
-#if USE_BOOT_BUTTON
-  pinMode(BOOT_BUTTON, INPUT_PULLUP);
-#endif
-#if USE_EXT_BUTTON
-  pinMode(BUTTON_IN, INPUT_PULLUP);
-  // Wire switch between BUTTON_IN and GND. No BUTTON_GND pin needed.
-#endif
   pinMode(PIN_RED, OUTPUT);
   pinMode(PIN_GREEN, OUTPUT);
   digitalWrite(PIN_RED, HIGH); 
@@ -259,7 +248,7 @@ void setup() {
   
   Serial.println("\n🎤 READY!");
   Serial.println("Always-on mode: AssemblyAI Streaming STT.");
-  Serial.println("Short press: toggle listening. Hold: reset chat history.");
+  Serial.println("Use serial commands (e.g. mute, say, H for help).");
   Serial.println("Type H for help with serial commands.");
   Serial.print("TTS provider: ");
   Serial.println(ttsProvider == TTS_GOOGLE ? "Google" : "Groq");
@@ -277,40 +266,6 @@ void setup() {
 }
 
 void loop() {
-  static unsigned long lastButtonChangeMs = 0;
-#if USE_BOOT_BUTTON
-  bool buttonState = digitalRead(BOOT_BUTTON);
-#elif USE_EXT_BUTTON
-  bool buttonState = digitalRead(BUTTON_IN);
-#else
-  bool buttonState = HIGH;  // no button
-#endif
-  if (buttonState != lastButtonState) {
-    lastButtonChangeMs = millis();
-  }
-  if ((millis() - lastButtonChangeMs) > BUTTON_DEBOUNCE_MS) {
-    if (!buttonPressed && lastButtonState == HIGH && buttonState == LOW) {
-      buttonPressed = true;
-      buttonPressMs = millis();
-    }
-    if (buttonPressed && lastButtonState == LOW && buttonState == HIGH) {
-      unsigned long pressDuration = millis() - buttonPressMs;
-      buttonPressed = false;
-      if (pressDuration >= BUTTON_LONG_MS) {
-        clearChatHistory();
-        listeningEnabled = true;
-        Serial.println("Chat history cleared");
-      } else {
-        listeningEnabled = !listeningEnabled;
-        Serial.print("Listening: ");
-        Serial.println(listeningEnabled ? "ON" : "OFF");
-      }
-      ledRecording = false;
-      ledWaiting = false;
-    }
-  }
-  lastButtonState = buttonState;
-
   while (Serial.available() > 0) {
     char c = Serial.read();
     if (c == 'T' || c == 't') {
@@ -421,7 +376,7 @@ void loop() {
         Serial.println("TTS provider: Groq");
       }
     } else if (c == 'M' || c == 'm') {
-      // mute = toggle listening (same as button) | M### = mic sensitivity
+      // mute = toggle listening | M### = mic sensitivity
       String rest = "";
       unsigned long start = millis();
       while (millis() - start < 500) {
@@ -521,7 +476,7 @@ void loop() {
       Serial.println("G      - Test Groq TTS (free, unlimited)");
       Serial.println("say [text] - Send as voice input: LLM + TTS (e.g. say What time is it?)");
       Serial.println("O [msg] - Test Google TTS with custom message (e.g. O Hello world)");
-      Serial.println("mute   - Toggle mic on/off (same as button)");
+      Serial.println("mute   - Toggle mic on/off");
       Serial.println("M      - Show mic sensitivity threshold");
       Serial.println("M###   - Set mic threshold (lower=more sensitive, e.g. M200)");
       Serial.println("V      - Show volume");
