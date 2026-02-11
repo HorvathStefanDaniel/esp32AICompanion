@@ -41,7 +41,7 @@ const char* llm_model = llm_model_8b;
 
 // Wake/end word: set requireWakeEndWords = false to send every utterance to LLM
 const char* wake_word = "instructor";
-const char* end_word = "";
+const char* end_word = "please";
 bool requireWakeEndWords = true;
 bool wakeActive = false;
 String commandBuffer = "";
