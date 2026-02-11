@@ -57,7 +57,7 @@ String stt_ws_path = "/v3/ws?sample_rate=16000&encoding=pcm_s16le&format_turns=t
                      "&max_turn_silence=1500";
 
 // Audio calibration (use M/V/I serial commands to tune)
-int outputVolumePercent = 100;
+int outputVolumePercent = 33;
 int silenceThreshold = 20;
 int micTestVolumeShift = 2;
 
@@ -367,13 +367,42 @@ void loop() {
       Serial.println("Google TTS: " + customMsg);
       speakGoogleTTS(customMsg);
     } else if (c == 'P' || c == 'p') {
-      // Toggle TTS provider
-      if (ttsProvider == TTS_GROQ) {
-        ttsProvider = TTS_GOOGLE;
-        Serial.println("TTS provider: Google");
+      // Check for "rompt" (prompt command) vs plain P (toggle TTS provider)
+      String rest = "";
+      unsigned long start = millis();
+      while (millis() - start < 500) {
+        while (Serial.available() > 0) {
+          char d = Serial.read();
+          if (d == '\n' || d == '\r') break;
+          rest += d;
+        }
+        if (rest.indexOf('\n') >= 0) break;
+        delay(5);
+      }
+      rest.trim();
+      rest.toLowerCase();
+      if (rest == "rompt") {
+        // Show first line of current prompt
+        Serial.print("Current prompt: ");
+        Serial.println(getCurrentPromptFirstLine());
+        Serial.printf("Prompt index: %d/%d\n", currentPromptIndex, PROMPT_COUNT - 1);
+      } else if (rest == "romptnext") {
+        // Cycle to next prompt and reset history
+        currentPromptIndex = (currentPromptIndex + 1) % PROMPT_COUNT;
+        clearChatHistory();
+        Serial.printf("Switched to prompt %d/%d\n", currentPromptIndex, PROMPT_COUNT - 1);
+        Serial.print("New prompt: ");
+        Serial.println(getCurrentPromptFirstLine());
+        Serial.println("Chat history cleared.");
       } else {
-        ttsProvider = TTS_GROQ;
-        Serial.println("TTS provider: Groq");
+        // No "rompt" command, toggle TTS provider (original P command)
+        if (ttsProvider == TTS_GROQ) {
+          ttsProvider = TTS_GOOGLE;
+          Serial.println("TTS provider: Google");
+        } else {
+          ttsProvider = TTS_GROQ;
+          Serial.println("TTS provider: Groq");
+        }
       }
     } else if (c == 'M' || c == 'm') {
       // mute = toggle listening | M### = mic sensitivity
@@ -467,6 +496,44 @@ void loop() {
       } else {
         Serial.printf("Current mic gain shift: %d (lower=louder, try I0-I6)\n", micTestVolumeShift);
       }
+    } else if (c == 'P' || c == 'p') {
+      // Check for "rompt" (prompt command) vs plain P (toggle TTS provider)
+      String rest = "";
+      unsigned long start = millis();
+      while (millis() - start < 500) {
+        while (Serial.available() > 0) {
+          char d = Serial.read();
+          if (d == '\n' || d == '\r') break;
+          rest += d;
+        }
+        if (rest.indexOf('\n') >= 0) break;
+        delay(5);
+      }
+      rest.trim();
+      rest.toLowerCase();
+      if (rest == "rompt") {
+        // Show first line of current prompt
+        Serial.print("Current prompt: ");
+        Serial.println(getCurrentPromptFirstLine());
+        Serial.printf("Prompt index: %d/%d\n", currentPromptIndex, PROMPT_COUNT - 1);
+      } else if (rest == "romptnext") {
+        // Cycle to next prompt and reset history
+        currentPromptIndex = (currentPromptIndex + 1) % PROMPT_COUNT;
+        clearChatHistory();
+        Serial.printf("Switched to prompt %d/%d\n", currentPromptIndex, PROMPT_COUNT - 1);
+        Serial.print("New prompt: ");
+        Serial.println(getCurrentPromptFirstLine());
+        Serial.println("Chat history cleared.");
+      } else {
+        // No "rompt" command, toggle TTS provider (original P command)
+        if (ttsProvider == TTS_GROQ) {
+          ttsProvider = TTS_GOOGLE;
+          Serial.println("TTS provider: Google");
+        } else {
+          ttsProvider = TTS_GROQ;
+          Serial.println("TTS provider: Groq");
+        }
+      }
     } else if (c == 'H' || c == 'h' || c == '?') {
       // Help - list all commands
       Serial.println("\n=== Serial Commands ===");
@@ -485,6 +552,8 @@ void loop() {
       Serial.println("X      - Toggle mic test mode (hear mic on speaker)");
       Serial.println("I      - Show mic input gain (test mode)");
       Serial.println("I#     - Set mic input gain shift (0=loud, 4=medium, 6=quiet)");
+      Serial.println("prompt - Show first line of current prompt");
+      Serial.println("promptNext - Switch to next prompt and reset chat history");
       Serial.println("H/?    - Show this help");
       Serial.println("");
       Serial.printf("Current settings:\n");
@@ -496,6 +565,7 @@ void loop() {
       Serial.printf("  Wake/end words: %s\n", requireWakeEndWords ? "Required" : "Disabled");
       Serial.printf("  Mic test mode: %s\n", micTestMode ? "ON" : "OFF");
       Serial.printf("  LLM model: %s\n", llm_model == llm_model_8b ? "llama-3.1-8b-instant" : "llama-3.3-70b-versatile");
+      Serial.printf("  Current prompt: %d/%d - %s\n", currentPromptIndex, PROMPT_COUNT - 1, getCurrentPromptFirstLine().c_str());
       Serial.println("=======================\n");
     }
   }

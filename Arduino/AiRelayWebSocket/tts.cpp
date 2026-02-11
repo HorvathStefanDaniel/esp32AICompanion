@@ -2,6 +2,7 @@
 #include "audio_utils.h"
 #include "config.h"
 #include "globals.h"
+#include "prompts.h"
 #include <Arduino.h>
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
@@ -284,10 +285,28 @@ void speakGoogleTTS(const String& text) {
   http.begin(url);
   http.addHeader("Content-Type", "application/json");
 
+  // Get character-specific voice settings
+  const char* voiceName = getCurrentPromptVoice();
+  float speakingRate = getCurrentPromptSpeakingRate();
+  float pitch = getCurrentPromptPitch();
+  
+  Serial.printf("Google TTS: Voice=%s, Rate=%.2f, Pitch=%.1fst\n", voiceName, speakingRate, pitch);
+  
+  // Escape text for SSML (escape &, <, >)
+  String escapedText = text;
+  escapedText.replace("&", "&amp;");
+  escapedText.replace("<", "&lt;");
+  escapedText.replace(">", "&gt;");
+  
+  // Build SSML with prosody for rate and pitch
+  String ssmlText = "<speak><prosody rate=\"" + String(speakingRate) + 
+                    "\" pitch=\"" + String(pitch) + "st\">" + 
+                    escapedText + "</prosody></speak>";
+  
   JsonDocument requestDoc;
-  requestDoc["input"]["text"] = text;
+  requestDoc["input"]["ssml"] = ssmlText;
   requestDoc["voice"]["languageCode"] = google_tts_language;
-  requestDoc["voice"]["name"] = google_tts_voice;
+  requestDoc["voice"]["name"] = voiceName;
   requestDoc["audioConfig"]["audioEncoding"] = "LINEAR16";
   requestDoc["audioConfig"]["sampleRateHertz"] = 24000;
 

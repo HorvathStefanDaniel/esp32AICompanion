@@ -101,7 +101,7 @@ String getChatResponse(String input) {
   JsonArray messages = doc["messages"].to<JsonArray>();
   JsonObject sysMsg = messages.add<JsonObject>();
   sysMsg["role"] = "system";
-  sysMsg["content"] = SYSTEM_PROMPT;
+  sysMsg["content"] = getCurrentPrompt();
   for (uint8_t i = 0; i < historyCount; i++) {
     JsonObject histMsg = messages.add<JsonObject>();
     histMsg["role"] = chatHistory[i].role;
