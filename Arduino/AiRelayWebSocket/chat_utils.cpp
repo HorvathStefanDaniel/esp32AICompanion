@@ -4,6 +4,7 @@
 #include "prompts.h"
 #include <Arduino.h>
 #include <HTTPClient.h>
+#include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
 
 String toLowerCopy(const String& input) {
@@ -79,9 +80,20 @@ void addHistory(const char* role, const String& content) {
 
 String getChatResponse(String input) {
   Serial.println("Sending to Groq (LLM)...");
+  
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("LLM: WiFi not connected!");
+    return "";
+  }
+  
+  // Use the original approach - HTTPClient handles HTTPS automatically
   HTTPClient http;
-  http.setTimeout(15000);
+  http.setTimeout(20000);
+  http.setReuse(false); // Don't reuse connections
+  
+  Serial.println("LLM: Connecting...");
   http.begin("https://api.groq.com/openai/v1/chat/completions");
+  
   http.addHeader("Content-Type", "application/json");
   http.addHeader("Authorization", "Bearer " + String(groq_api_key));
   JsonDocument doc;
@@ -100,16 +112,24 @@ String getChatResponse(String input) {
   userMsg["content"] = input;
   String payload;
   serializeJson(doc, payload);
+  
+  Serial.println("LLM: Sending POST...");
   int httpCode = http.POST(payload);
   String result = "";
   if (httpCode == 200) {
+    Serial.println("LLM: Success!");
     String response = http.getString();
     JsonDocument resDoc;
     deserializeJson(resDoc, response);
     result = resDoc["choices"][0]["message"]["content"].as<String>();
   } else {
     Serial.printf("LLM Error: %d\n", httpCode);
-    Serial.println(http.getString());
+    if (httpCode > 0) {
+      Serial.println(http.getString());
+    } else {
+      Serial.printf("Connection failed. WiFi status: %d\n", WiFi.status());
+      Serial.printf("Free heap: %u\n", ESP.getFreeHeap());
+    }
   }
   http.end();
   return result;

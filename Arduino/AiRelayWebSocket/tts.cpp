@@ -4,6 +4,7 @@
 #include "globals.h"
 #include <Arduino.h>
 #include <HTTPClient.h>
+#include <WiFiClientSecure.h>
 #include <SPIFFS.h>
 #include <ArduinoJson.h>
 #include <mbedtls/base64.h>
@@ -16,9 +17,21 @@ void speakGroqTTS(String text) {
   Serial.println("Requesting Groq TTS...");
   digitalWrite(PIN_RED, LOW);
   ttsPlaying = true;
+  
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("Groq TTS: WiFi not connected!");
+    digitalWrite(PIN_RED, HIGH);
+    ttsPlaying = false;
+    return;
+  }
+  
   HTTPClient http;
-  http.setTimeout(15000);
+  http.setTimeout(20000);
+  http.setReuse(false); // Don't reuse connections
+  
+  Serial.println("Groq TTS: Connecting...");
   http.begin("https://api.groq.com/openai/v1/audio/speech");
+  
   http.addHeader("Authorization", "Bearer " + String(groq_api_key));
   http.addHeader("Content-Type", "application/json");
   JsonDocument doc;
@@ -28,8 +41,11 @@ void speakGroqTTS(String text) {
   doc["response_format"] = "wav";
   String payload;
   serializeJson(doc, payload);
+  
+  Serial.println("Groq TTS: Sending POST...");
   int httpCode = http.POST(payload);
   if (httpCode == 200) {
+    Serial.println("Groq TTS: Success!");
     File outfile = SPIFFS.open("/tts.wav", FILE_WRITE);
     if (outfile) {
       http.writeToStream(&outfile);
@@ -38,6 +54,9 @@ void speakGroqTTS(String text) {
     }
   } else {
     Serial.printf("TTS Error: %d\n", httpCode);
+    if (httpCode < 0) {
+      Serial.printf("Connection failed. WiFi status: %d\n", WiFi.status());
+    }
   }
   http.end();
   digitalWrite(PIN_RED, HIGH);
@@ -248,9 +267,20 @@ void speakGoogleTTS(const String& text) {
   digitalWrite(PIN_RED, LOW);
   ttsPlaying = true;
 
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("Google TTS: WiFi not connected!");
+    digitalWrite(PIN_RED, HIGH);
+    ttsPlaying = false;
+    speakGroqTTS(text);
+    return;
+  }
+
   HTTPClient http;
   http.setTimeout(60000);
+  http.setReuse(false); // Don't reuse connections
   String url = String("https://texttospeech.googleapis.com/v1/text:synthesize?key=") + google_tts_api_key;
+  
+  Serial.println("Google TTS: Connecting...");
   http.begin(url);
   http.addHeader("Content-Type", "application/json");
 
