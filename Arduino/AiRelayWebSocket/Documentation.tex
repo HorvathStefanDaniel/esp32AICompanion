@@ -52,7 +52,7 @@ The device operates in an always-on listening mode, processing voice input throu
     \item \textbf{Real-time Streaming STT:} AssemblyAI WebSocket-based speech recognition with automatic turn detection
     \item \textbf{Dual LLM Models:} Toggle between fast 8B model (llama-3.1-8b-instant) and advanced 70B model (llama-3.3-70b-versatile)
     \item \textbf{Dual TTS Providers:} Support for both Groq TTS and Google Cloud TTS with SSML voice customization
-    \item \textbf{Multiple AI Personalities:} Four distinct character prompts (Math Buddy, Pythagoras, Archimedes, Euclid) with unique voices
+    \item \textbf{Multiple AI Personalities:} Five distinct character prompts (Math Buddy, Pythagoras, Archimedes, Euclid, Campus Sustainability Advisor) with unique voices
     \item \textbf{Dynamic Voice Selection:} Character-specific voice profiles with adjustable speaking rate and pitch
     \item \textbf{Wake/End Word Support:} Optional wake word ("instructor") and end word ("please") activation
     \item \textbf{Chat History Management:} Maintains conversation context with configurable history length
@@ -82,7 +82,7 @@ The following components are required to build the AI Tutor:
 Microcontroller     & ESP32-S3-N16R8        & 1                 \\
 Microphone          & INMP441 (I2S)         & 1                 \\
 Speaker Amp         & MAX98357A (I2S)       & 1                 \\
-LEDs                & 3.3V single-color LEDs (e.g. red, green) & 2                 \\
+LEDs                & 3.3V tri LED & 1                 \\
 Speaker             & 3W 8OHM speaker       & 1                 \\ \bottomrule
 \end{tabular}
 \end{center}
@@ -97,7 +97,7 @@ The I2S peripherals connect to the ESP32 as listed below. These values match the
             \item WS (word select / L/R clock) $\rightarrow$ GPIO 13 (\texttt{I2S\_MIC\_WS})
             \item SD (data out) $\rightarrow$ GPIO 14 (\texttt{I2S\_MIC\_SD})
             \item L/R $\rightarrow$ GND (selects left channel; 3.3V would select right)
-            \item VCC / 3V3 $\rightarrow$ 3.3V
+            \item VDD $\rightarrow$ 3.3V
             \item GND $\rightarrow$ GND
         \end{itemize}
     \item \textbf{Amplifier (MAX98357A):} Again, only the I2S pins go to the ESP32; the rest are power/control.
@@ -110,7 +110,7 @@ The I2S peripherals connect to the ESP32 as listed below. These values match the
             \item GAIN $\rightarrow$ same rail as VIN (3.3V or 5V)
             \item GND $\rightarrow$ GND
         \end{itemize}
-    \item \textbf{Status LEDs:} Two single-color LEDs, wired as active-low indicators.
+    \item \textbf{Status LEDs:} Two LEDs, wired as active-low indicators.
         \begin{itemize}
             \item RED LED: cathode $\rightarrow$ GPIO 1 (\texttt{PIN\_RED}), anode $\rightarrow$ resistor $\rightarrow$ 3.3V
             \item GREEN LED: cathode $\rightarrow$ GPIO 2 (\texttt{PIN\_GREEN}), anode $\rightarrow$ resistor $\rightarrow$ 3.3V
@@ -220,13 +220,14 @@ In this project, prompts are stored in \texttt{prompts.cpp} and can be dynamical
 This structured approach allows for precise control over AI behavior while maintaining natural conversation flow. Users can switch between prompts using the \texttt{promptNext} serial command, which resets conversation history to ensure each character starts with a clean context.
 
 \subsection{Character Prompts}
-The system supports four distinct AI personalities, each with unique teaching styles and voice characteristics:
+The system supports five distinct AI personalities, each with unique teaching styles and voice characteristics:
 
 \begin{itemize}
     \item \textbf{Math Buddy (Prompt 0):} Friendly modern mathematics tutor for 8th grade students. Uses warm female voice (Wavenet-G).
     \item \textbf{Pythagoras (Prompt 1):} Ancient Greek mathematician and philosopher with mystical approach. Uses deeper male voice (Wavenet-B) with slower, contemplative delivery.
     \item \textbf{Archimedes (Prompt 2):} Enthusiastic Greek inventor and mathematician. Uses clear male voice (Wavenet-A) with faster, energetic delivery.
     \item \textbf{Euclid (Prompt 3):} Systematic "Father of Geometry" with methodical teaching style. Uses clear male voice (Wavenet-I) with precise delivery.
+    \item \textbf{Campus Sustainability Advisor (Prompt 4):} Friendly and knowledgeable advisor helping students make environmentally responsible decisions. Provides practical, actionable advice on energy conservation, recycling, sustainable transportation, water conservation, and measuring sustainability impact. Uses neutral, friendly female voice (Wavenet-C) with encouraging delivery.
 \end{itemize}
 
 Switch between prompts using the \texttt{promptNext} serial command, which also clears chat history.

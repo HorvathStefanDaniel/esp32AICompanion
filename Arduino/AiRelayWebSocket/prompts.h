@@ -8,7 +8,7 @@
 extern const char* PROMPTS[];
 
 // Number of prompts available
-#define PROMPT_COUNT 4
+#define PROMPT_COUNT 5
 
 // Current prompt index (default to 0)
 extern uint8_t currentPromptIndex;
