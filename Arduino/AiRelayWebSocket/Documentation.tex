@@ -26,11 +26,11 @@
     linkcolor=black,
     filecolor=magenta,      
     urlcolor=blue,
-    pdftitle={ESP32 AI Tutor Documentation},
+    pdftitle={ESP32 AI Companion Documentation},
 }
 
 % Project Metadata
-\title{\textbf{ESP32 AI Tutor Documentation}}
+\title{\textbf{ESP32 AI Companion Documentation}}
 \author{Stefan-Daniel Horvath}
 \date{February 2026}
 
@@ -43,21 +43,31 @@
 \newpage
 
 \section{Project Description}
-The \textbf{ESP32 AI Tutor} is an embedded hardware device designed to facilitate interactive learning through natural language processing. By leveraging the connectivity and processing power of the ESP32 microcontroller, this project integrates Large Language Model (LLM) APIs to provide voice or text-based educational assistance.
+The \textbf{ESP32 AI Companion} is an embedded voice assistant device built on the ESP32-S3 microcontroller. It provides real-time voice interaction capabilities through streaming speech recognition, Large Language Model (LLM) processing, and text-to-speech synthesis. The system supports multiple AI personalities and character voices, making it suitable for educational tutoring, general conversation, and interactive learning applications.
 
-The primary goal of this project is to create a low-cost, portable, and accessible teaching assistant that can answer questions, explain complex concepts, and assist with language learning without the need for a full computer or smartphone.
+The device operates in an always-on listening mode, processing voice input through AssemblyAI's streaming STT service, sending transcriptions to Groq's LLM API, and playing responses through Google Cloud TTS or Groq TTS with character-specific voice profiles.
 
 \subsection{Key Features}
 \begin{itemize}
-    \item Real-time query processing via WiFi.
-    \item Text-to-Speech (TTS) output for auditory learning.
-    \item Integration with Groq and Google API.
+    \item \textbf{Real-time Streaming STT:} AssemblyAI WebSocket-based speech recognition with automatic turn detection
+    \item \textbf{Dual LLM Models:} Toggle between fast 8B model (llama-3.1-8b-instant) and advanced 70B model (llama-3.3-70b-versatile)
+    \item \textbf{Dual TTS Providers:} Support for both Groq TTS and Google Cloud TTS with SSML voice customization
+    \item \textbf{Multiple AI Personalities:} Four distinct character prompts (Math Buddy, Pythagoras, Archimedes, Euclid) with unique voices
+    \item \textbf{Dynamic Voice Selection:} Character-specific voice profiles with adjustable speaking rate and pitch
+    \item \textbf{Wake/End Word Support:} Optional wake word ("instructor") and end word ("please") activation
+    \item \textbf{Chat History Management:} Maintains conversation context with configurable history length
+    \item \textbf{Serial Command Interface:} Comprehensive serial commands for configuration and testing
+    \item \textbf{LED Status Indicators:} Visual feedback for recording and processing states
+    \item \textbf{Mic Test Mode:} Real-time audio passthrough for microphone calibration
+    \item \textbf{Volume and Sensitivity Controls:} Adjustable output volume and microphone sensitivity thresholds
 \end{itemize}
 
 \section{Links}
 \begin{itemize}
     \item \textbf{GitHub Repository:} \href{https://github.com/HorvathStefanDaniel/esp32AICompanion}{https://github.com/HorvathStefanDaniel/esp32AICompanion}
-    \item \textbf{Demo Video:} \href{https://youtube.com}{YouTube Link}
+    \item \textbf{AssemblyAI:} \href{https://www.assemblyai.com/}{https://www.assemblyai.com/} (STT API)
+    \item \textbf{Groq:} \href{https://groq.com/}{https://groq.com/} (LLM \& TTS API)
+    \item \textbf{Google Cloud TTS:} \href{https://cloud.google.com/text-to-speech}{https://cloud.google.com/text-to-speech}
 \end{itemize}
 
 \section{Hardware}
@@ -127,10 +137,23 @@ Ensure the following libraries are installed via the Arduino Library Manager (or
 \begin{itemize}
     \item \texttt{WiFi} / \texttt{WiFiClientSecure} (ESP32 core)
     \item \texttt{HTTPClient} (ESP32 core)
-    \item \texttt{WebSocketsClient} (by Markus Sattler)
-    \item \texttt{ArduinoJson} (by Benoît Blanchon)
+    \item \texttt{WebSocketsClient} (by Markus Sattler) - Required for AssemblyAI streaming STT
+    \item \texttt{ArduinoJson} (by Benoît Blanchon) - Version 7.x recommended
     \item \texttt{SPIFFS} (ESP32 filesystem support)
     \item Included library \texttt{DAZI-AI-main} (MP3 decoder / audio playback)
+\end{itemize}
+
+\subsubsection{Arduino IDE Settings}
+For ESP32-S3 N16R8 boards, configure Arduino IDE with the following settings:
+\begin{itemize}
+    \item \textbf{Board:} ESP32S3 Dev Module
+    \item \textbf{USB CDC On Boot:} Disabled
+    \item \textbf{CPU Frequency:} 240MHz (WiFi)
+    \item \textbf{Flash Mode:} QIO 80MHz
+    \item \textbf{Flash Size:} 16MB (128Mb)
+    \item \textbf{Partition Scheme:} 8M with spiffs (3MB APP/1.5MB SPIFFS)
+    \item \textbf{PSRAM:} OPI PSRAM
+    \item \textbf{Serial Monitor Baud Rate:} 115200
 \end{itemize}
 
 \subsection{Configuration}
@@ -146,13 +169,12 @@ Before flashing the device, you must configure your credentials in \texttt{secre
 #define WIFI_PASSWORD "your_wifi_password"
 
 // API Keys
+// Groq API - Get key from: https://console.groq.com/keys
 #define GROQ_API_KEY "gsk_..."
+
 // AssemblyAI Streaming STT - Get API key from: https://www.assemblyai.com/app/account
-// 1. Sign up for a free account at https://www.assemblyai.com
-// 2. Go to your account dashboard: https://www.assemblyai.com/app/account
-// 3. Copy your API key from the dashboard
-// Free tier includes 5 hours/month of transcription
 #define ASSEMBLYAI_API_KEY "your_assemblyai_api_key"
+
 // Google Cloud TTS - Get API key from: https://console.cloud.google.com/apis/credentials
 // Enable "Cloud Text-to-Speech API" first at: https://console.cloud.google.com/apis/library/texttospeech.googleapis.com
 #define GOOGLE_TTS_API_KEY "your_google_tts_api_key"
@@ -161,11 +183,103 @@ Before flashing the device, you must configure your credentials in \texttt{secre
 \end{lstlisting}
 
 \subsection{Architecture Overview}
-The software operates in a loop consisting of three main states:
+The software operates in an always-on streaming mode with the following workflow:
+
 \begin{enumerate}
-    \item \textbf{Listening:} Captures audio data via I2S.
-    \item \textbf{Processing:} Sends payload to the API and parses the JSON response.
-    \item \textbf{Responding:} Streams the audio response through the amplifier.
+    \item \textbf{Audio Capture:} Continuously streams audio from INMP441 microphone via I2S (32-bit, 16kHz)
+    \item \textbf{Speech Recognition:} Sends audio chunks to AssemblyAI WebSocket STT service for real-time transcription
+    \item \textbf{Turn Detection:} AssemblyAI detects speech turns and returns final transcripts
+    \item \textbf{Wake/End Word Processing:} Optionally filters transcripts for wake word ("instructor") and end word ("please")
+    \item \textbf{LLM Processing:} Sends transcript to Groq LLM API with conversation history and character-specific system prompt
+    \item \textbf{TTS Synthesis:} Converts LLM response to speech using Google Cloud TTS or Groq TTS with character-specific voice settings
+    \item \textbf{Audio Playback:} Decodes MP3 audio and streams to MAX98357A amplifier via I2S (16-bit, 16kHz)
 \end{enumerate}
+
+\subsection{LLM Prompts and Prompt Engineering}
+A \textbf{Large Language Model (LLM)} is an artificial intelligence system trained on vast amounts of text data to understand and generate human-like text. LLMs can perform various tasks including answering questions, explaining concepts, creative writing, and conversational interaction. In this project, the device uses Groq's API to access powerful LLM models (llama-3.1-8b-instant and llama-3.3-70b-versatile) for generating intelligent responses to user queries.
+
+\textbf{Prompting} is the process of providing instructions or context to an LLM to guide its behavior and responses. A prompt acts as a "system message" that defines the AI's role, personality, constraints, and output format. Effective prompting is crucial for obtaining desired results from LLMs, as they are highly sensitive to how instructions are phrased.
+
+\textbf{Prompt engineering} is the practice of carefully crafting prompts to achieve specific outcomes. Key principles include:
+\begin{itemize}
+    \item \textbf{Role Definition:} Clearly establishing the AI's identity and expertise (e.g., "You are a mathematics tutor")
+    \item \textbf{Behavioral Guidelines:} Specifying how the AI should interact (e.g., "Never give answers directly, guide students to discover solutions")
+    \item \textbf{Format Constraints:} Defining response structure and length (e.g., "Keep responses SHORT, max 2-3 sentences")
+    \item \textbf{Context Setting:} Providing relevant background information and scope (e.g., "Topics: Algebra, geometry, fractions")
+    \item \textbf{Output Constraints:} Explicitly prohibiting unwanted behaviors (e.g., "Never include action descriptions or parenthetical notes")
+\end{itemize}
+
+In this project, prompts are stored in \texttt{prompts.cpp} and can be dynamically switched at runtime. Each prompt defines a complete AI personality with specific teaching style, topics, and communication format. The system prompt is sent to the LLM API along with conversation history, ensuring consistent character behavior throughout the interaction. The prompts follow a structured format with sections for:
+\begin{itemize}
+    \item \textbf{Identity:} Character name and background
+    \item \textbf{Teaching Style:} Specific behavioral guidelines and interaction patterns
+    \item \textbf{Topics:} Subject matter expertise and scope
+    \item \textbf{Format:} Response length, tone, and delivery constraints
+\end{itemize}
+
+This structured approach allows for precise control over AI behavior while maintaining natural conversation flow. Users can switch between prompts using the \texttt{promptNext} serial command, which resets conversation history to ensure each character starts with a clean context.
+
+\subsection{Character Prompts}
+The system supports four distinct AI personalities, each with unique teaching styles and voice characteristics:
+
+\begin{itemize}
+    \item \textbf{Math Buddy (Prompt 0):} Friendly modern mathematics tutor for 8th grade students. Uses warm female voice (Wavenet-G).
+    \item \textbf{Pythagoras (Prompt 1):} Ancient Greek mathematician and philosopher with mystical approach. Uses deeper male voice (Wavenet-B) with slower, contemplative delivery.
+    \item \textbf{Archimedes (Prompt 2):} Enthusiastic Greek inventor and mathematician. Uses clear male voice (Wavenet-A) with faster, energetic delivery.
+    \item \textbf{Euclid (Prompt 3):} Systematic "Father of Geometry" with methodical teaching style. Uses clear male voice (Wavenet-I) with precise delivery.
+\end{itemize}
+
+Switch between prompts using the \texttt{promptNext} serial command, which also clears chat history.
+
+\subsection{Serial Commands}
+The device supports comprehensive serial commands for configuration and testing (115200 baud):
+
+\begin{itemize}
+    \item \texttt{T} - Test current TTS provider
+    \item \texttt{toggleLLM} - Toggle between 8B (fast) and 70B (advanced) LLM models
+    \item \texttt{P} - Toggle TTS provider (Groq ↔ Google)
+    \item \texttt{prompt} - Show first line of current prompt
+    \item \texttt{promptNext} - Switch to next prompt and reset chat history
+    \item \texttt{say [text]} - Send text as voice input (LLM + TTS)
+    \item \texttt{mute} - Toggle microphone on/off
+    \item \texttt{M} - Show mic sensitivity threshold
+    \item \texttt{M###} - Set mic threshold (lower = more sensitive)
+    \item \texttt{V} - Show volume
+    \item \texttt{V###} - Set volume 0-100\%
+    \item \texttt{W} - Toggle wake/end word mode
+    \item \texttt{X} - Toggle mic test mode (hear mic on speaker)
+    \item \texttt{I} - Show mic input gain (test mode)
+    \item \texttt{I\#} - Set mic input gain shift (0=loud, 4=medium, 6=quiet)
+    \item \texttt{H} or \texttt{?} - Show help with all commands
+\end{itemize}
+
+\subsection{Module Structure}
+The codebase is organized into modular components:
+
+\begin{itemize}
+    \item \texttt{AiRelayWebSocket.ino} - Main program with setup, loop, and serial command handling
+    \item \texttt{stt.cpp/h} - AssemblyAI WebSocket STT client implementation
+    \item \texttt{tts.cpp/h} - Groq and Google Cloud TTS with MP3 decoding
+    \item \texttt{chat\_utils.cpp/h} - LLM API communication, wake/end word processing, chat history
+    \item \texttt{prompts.cpp/h} - Character prompt definitions and voice selection
+    \item \texttt{audio\_utils.cpp/h} - Audio processing utilities and volume control
+    \item \texttt{recording.cpp/h} - Microphone test mode and audio processing
+    \item \texttt{led\_task.cpp/h} - FreeRTOS task for LED status indicators
+    \item \texttt{config.h} - Configuration constants and pin definitions
+    \item \texttt{globals.h} - Global variable declarations
+\end{itemize}
+
+\subsection{API Services}
+The device integrates with the following external services:
+
+\begin{itemize}
+    \item \textbf{AssemblyAI Streaming STT:} WebSocket-based real-time speech recognition with automatic turn detection and multilingual support
+    \item \textbf{Groq API:} 
+        \begin{itemize}
+            \item LLM: llama-3.1-8b-instant (fast) or llama-3.3-70b-versatile (advanced)
+            \item TTS: canopylabs/orpheus-v1-english model
+        \end{itemize}
+    \item \textbf{Google Cloud TTS:} Wavenet voices (A-J) with SSML support for rate and pitch adjustment
+\end{itemize}
 
 \end{document}
